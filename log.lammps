@@ -1,0 +1,177 @@
+LAMMPS (7 Feb 2024 - Update 1)
+OMP_NUM_THREADS environment is not set. Defaulting to 1 thread. (src/comm.cpp:98)
+  using 1 OpenMP thread(s) per MPI task
+units           si
+atom_style      sphere
+boundary        f f f
+newton          off
+comm_modify     vel yes
+
+# Domain definition
+region          box block 0 0.1 0 0.1 0 0.2 units box
+create_box      1 box
+Created orthogonal box = (0 0 0) to (0.1 0.1 0.2)
+  1 by 1 by 1 MPI processor grid
+
+# Particle properties
+variable        density equal 2500.0    # kg/m^3 (sand-like)
+
+# Define creation region in upper half of box
+region          creation block 0.015 0.085 0.015 0.085 0.13 0.19 units box
+
+# Create particles on a lattice
+lattice         sc 0.015
+Lattice spacing in x,y,z = 0.015 0.015 0.015
+create_atoms    1 region creation
+Created 100 atoms
+  using lattice units in orthogonal box = (0 0 0) to (0.1 0.1 0.2)
+  create_atoms CPU = 0.000 seconds
+
+# Set particle properties
+set             group all diameter 0.006
+Setting atom values ...
+  100 settings made for diameter
+set             group all density ${density}
+set             group all density 2500
+Setting atom values ...
+  100 settings made for density
+set             group all type 1
+Setting atom values ...
+  100 settings made for type
+
+# Give particles random initial velocities
+velocity        all create 0.5 87287 dist gaussian
+
+# Define groups
+group           particles type 1
+100 atoms in group particles
+
+# Neighbor list
+neighbor        0.001 bin
+neigh_modify    delay 0
+
+# Particle-particle interaction (Hertzian contact)
+pair_style      gran/hertz/history 2e8 NULL 5e7 NULL 0.5 0  # Kn, Kt, gamma_n, gamma_t, xmu, dampflag
+pair_coeff      * *
+
+# Timestep
+timestep        0.00001   # 10 microseconds
+
+# Gravity
+fix             grav all gravity 9.81 vector 0 0 -1
+
+# Walls (granular walls)
+fix             xwall1 all wall/gran hertz/history 2e8 NULL 5e7 NULL 0.5 0 xplane 0.0 0.1
+fix             ywall1 all wall/gran hertz/history 2e8 NULL 5e7 NULL 0.5 0 yplane 0.0 0.1
+fix             zwall1 all wall/gran hertz/history 2e8 NULL 5e7 NULL 0.5 0 zplane 0.0 0.2
+
+# Time integration
+fix             integrate all nve/sphere
+
+# Output settings
+thermo_style    custom step atoms ke pe etotal
+thermo          1000
+
+# Dump for visualization (every 500 steps)
+dump            viz all custom 500 dump.grain id type x y z radius vx vy vz
+dump_modify     viz sort id
+
+# Run simulation
+run             50000
+Generated 0 of 0 mixed pair_coeff terms from geometric mixing rule
+Neighbor list info ...
+  update: every = 1 steps, delay = 0 steps, check = yes
+  max neighbors/atom: 2000, page size: 100000
+  master list distance cutoff = 0.007
+  ghost atom cutoff = 0.007
+  binsize = 0.0035, bins = 29 29 58
+  1 neighbor lists, perpetual/occasional/extra = 1 0 0
+  (1) pair gran/hertz/history, perpetual
+      attributes: half, newton off, size, history
+      pair build: half/size/bin/atomonly/newtoff
+      stencil: full/bin/3d
+      bin: standard
+Per MPI rank memory allocation (min/avg/max) = 11.34 | 11.34 | 11.34 Mbytes
+   Step        Atoms        KinEng         PotEng         TotEng    
+         0         100   1.0251329e-21  0              1.0251329e-21
+      1000         100   0.00013605058  0              0.00013605058
+      2000         100   0.00054420232  0              0.00054420232
+      3000         100   0.0012244552   0              0.0012244552 
+      4000         100   0.0021768093   0              0.0021768093 
+      5000         100   0.0034012645   0              0.0034012645 
+      6000         100   0.0048978209   0              0.0048978209 
+      7000         100   0.0066664785   0              0.0066664785 
+      8000         100   0.0087072372   0              0.0087072372 
+      9000         100   0.011020097    0              0.011020097  
+     10000         100   0.013605058    0              0.013605058  
+     11000         100   0.01646212     0              0.01646212   
+     12000         100   0.019591284    0              0.019591284  
+     13000         100   0.022992548    0              0.022992548  
+     14000         100   0.026665914    0              0.026665914  
+     15000         100   0.030611381    0              0.030611381  
+     16000         100   0.034828949    0              0.034828949  
+     17000         100   0.024131427    0              0.024131427  
+     18000         100   0.0057928261   0              0.0057928261 
+     19000         100   2.7314001e-05  0              2.7314001e-05
+     20000         100   2.6295852e-05  0              2.6295852e-05
+     21000         100   5.0738594e-05  0              5.0738594e-05
+     22000         100   1.9244534e-06  0              1.9244534e-06
+     23000         100   8.7281816e-06  0              8.7281816e-06
+     24000         100   8.1617675e-07  0              8.1617675e-07
+     25000         100   6.152899e-09   0              6.152899e-09 
+     26000         100   7.813139e-09   0              7.813139e-09 
+     27000         100   5.9192468e-10  0              5.9192468e-10
+     28000         100   1.4045943e-10  0              1.4045943e-10
+     29000         100   4.8025731e-11  0              4.8025731e-11
+     30000         100   2.2731301e-12  0              2.2731301e-12
+     31000         100   5.4741116e-12  0              5.4741116e-12
+     32000         100   9.9023823e-12  0              9.9023823e-12
+     33000         100   2.7820634e-11  0              2.7820634e-11
+     34000         100   7.8541947e-11  0              7.8541947e-11
+     35000         100   2.2280229e-10  0              2.2280229e-10
+     36000         100   6.3399579e-10  0              6.3399579e-10
+     37000         100   1.8089292e-09  0              1.8089292e-09
+     38000         100   5.1768151e-09  0              5.1768151e-09
+     39000         100   1.4857398e-08  0              1.4857398e-08
+     40000         100   4.2758607e-08  0              4.2758607e-08
+     41000         100   1.2340052e-07  0              1.2340052e-07
+     42000         100   3.5712911e-07  0              3.5712911e-07
+     43000         100   1.0367071e-06  0              1.0367071e-06
+     44000         100   3.0207143e-06  0              3.0207143e-06
+     45000         100   8.8363282e-06  0              8.8363282e-06
+     46000         100   2.5730085e-05  0              2.5730085e-05
+     47000         100   7.2083817e-05  0              7.2083817e-05
+     48000         100   0.0001832236   0              0.0001832236 
+     49000         100   0.00039731121  0              0.00039731121
+     50000         100   0.00071064449  0              0.00071064449
+Loop time of 0.318647 on 1 procs for 50000 steps with 100 atoms
+
+99.9% CPU use with 1 MPI tasks x 1 OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 0.075488   | 0.075488   | 0.075488   |   0.0 | 23.69
+Neigh   | 0.010612   | 0.010612   | 0.010612   |   0.0 |  3.33
+Comm    | 0.0024174  | 0.0024174  | 0.0024174  |   0.0 |  0.76
+Output  | 0.012379   | 0.012379   | 0.012379   |   0.0 |  3.88
+Modify  | 0.20268    | 0.20268    | 0.20268    |   0.0 | 63.61
+Other   |            | 0.01507    |            |       |  4.73
+
+Nlocal:            100 ave         100 max         100 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Nghost:              0 ave           0 max           0 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+Neighs:             73 ave          73 max          73 min
+Histogram: 1 0 0 0 0 0 0 0 0 0
+
+Total # of neighbors = 73
+Ave neighs/atom = 0.73
+Neighbor list builds = 342
+Dangerous builds = 0
+
+# Write final configuration
+write_data      final_settled.data
+System init for write_data ...
+Generated 0 of 0 mixed pair_coeff terms from geometric mixing rule
+Total wall time: 0:00:00

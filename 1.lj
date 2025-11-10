@@ -1,0 +1,180 @@
+###################################Header for General commands#######################################################
+atom_style        sphere                 # Simulation of spherical particles
+boundary        f f f                     # Fixed boundaries
+units           si
+comm_modify     vel yes                   # Enable velocity communication for granular
+newton          off                       # Default
+
+###################################System variables##################################################################
+# Definition of boundaries
+variable xmin  equal  -0.15
+variable xmax equal   0.15
+
+variable ymin  equal  -0.15
+variable ymax equal   0.15
+
+variable zmin  equal  -0.15
+variable zmax equal   0.15
+
+# Definition of the timestep
+variable dt equal 1e-5            # Timestep = 0.00001 second
+
+###################################Specific variables for current simulation#########################################
+
+# Variable for material properties
+#### Young Modulus ####
+variable    youngmodulus1    equal     5e6        # N/m² (Pa)
+variable    youngmodulus2    equal     5e6        # N/m²
+
+#### Poisson ratio ####
+variable     poisson1    equal    0.3
+variable     poisson2    equal    0.3
+
+#### Coefficient of restitution ####
+variable    CoR11    equal    0.6
+variable    CoR12    equal    0.6
+variable    CoR22    equal    0.6
+
+#### Sliding friction coefficient ####
+variable    sf11    equal    0.3
+variable    sf12    equal    0.3
+variable    sf22    equal    0.3
+
+#### Rolling friction coefficient ####
+variable    rf11    equal    0.8
+variable    rf12    equal    0.8
+variable    rf22    equal    0.8
+
+######### Variable for particle #######
+variable    radius1    equal    0.005    # m
+variable    density    equal    2500     # kg/m³
+
+#### Filling parameters #########
+variable    filltime    equal 5          # seconds
+variable    fillmass    equal    10      # kg
+variable    fillmassrate    equal    ${fillmass}/${filltime}    # kg/s
+variable    fillsteps    equal    ${filltime}/${dt}
+
+variable settletime equal 2              # seconds
+variable settlesteps equal  ${settletime}/${dt}
+
+###################################Definition of simulation box#######################################################
+
+region        reg block ${xmin} ${xmax} ${ymin} ${ymax} ${zmin} ${zmax} units box
+
+create_box    2 reg
+
+neighbor    0.004 bin
+neigh_modify    delay 0
+
+###################################Definition of the contact models####################################################
+
+# Using pair_style granular with hertz model and tangential history
+# This replaces LIGGGHTS' "gran model hertz tangential history"
+pair_style gran/hooke/history 1000000.0 NULL 50.0 NULL 0.5 1
+
+# Placeholder - will be set after particles are created
+pair_coeff    * *
+
+timestep ${dt}
+
+# Integration fix for spherical particles
+fix        integrator all nve/sphere
+
+# Gravity in negative z direction
+fix        gravi all gravity 9.81 vector 0.0 0.0 -1.0
+
+###################################Definition of walls using fix wall/gran#######################################
+# LAMMPS uses fix wall/gran for granular walls instead of LIGGGHTS mesh-based walls
+# Using hertz/history model for walls (equivalent to your contact model)
+
+# Bottom wall (z = -0.15)
+fix walls all wall/gran hooke/history 1000000.0 NULL 50.0 NULL 0.5 1 zplane ${zmin} NULL
+
+# Top wall (z = 0.15)  
+fix wallz all wall/gran hooke/history 1000000.0 NULL 50.0 NULL 0.5 1 zplane ${zmax} NULL
+
+# Left x wall (x = -0.15)
+fix wallxl all wall/gran hooke/history 1000000.0 NULL 50.0 NULL 0.5 1 xplane ${xmin} NULL
+
+# Right x wall (x = 0.15)
+fix wallxr all wall/gran hooke/history 1000000.0 NULL 50.0 NULL 0.5 1 xplane ${xmax} NULL
+
+# Left y wall (y = -0.15)
+fix wallyl all wall/gran hooke/history 1000000.0 NULL 50.0 NULL 0.5 1 yplane ${ymin} NULL
+
+# Right y wall (y = 0.15)
+fix wallyr all wall/gran hooke/history 1000000.0 NULL 50.0 NULL 0.5 1 yplane ${ymax} NULL
+
+###################################Particle insertion region#########################################
+# Define insertion region - LAMMPS doesn't have direct mesh-based insertion like LIGGGHTS
+# Use a region for particle pouring/deposition
+
+# Create a region above the box for insertion
+variable insert_z_min equal 0.05
+variable insert_z_max equal 0.14
+
+region insert_region block ${xmin} ${xmax} ${ymin} ${ymax} ${insert_z_min} ${insert_z_max} units box
+
+###################################Generation and Insertion of particles#########################################
+# LAMMPS uses fix pour or fix deposit for particle insertion
+# Using fix pour to generate particles continuously
+
+# Calculate number of particles to insert
+# N = mass / (density * volume_per_particle)
+# volume_per_particle = (4/3) * pi * r^3
+variable vol_particle equal 4.0*PI*${radius1}*${radius1}*${radius1}/3.0
+variable mass_particle equal ${density}*${vol_particle}
+variable nparticles equal floor(${fillmass}/${mass_particle})
+variable insertion_rate equal ${nparticles}/${filltime}
+
+# Use fix pour to insert particles
+# Syntax: fix ID group pour N type seed region-ID keyword values
+# diam: diameter range for inserted particles
+# dens: density range  
+# vel: velocity components (vxlo vxhi vylo vyhi vz)
+# rate: rate at which region moves in z direction
+
+variable diam equal 2*${radius1}
+
+fix ins all pour ${nparticles} 1 12345 region insert_region &
+    diam ${diam} ${diam} &
+    dens ${density} ${density} &
+    vel 0.0 0.0 0.0 0.0 -0.75 &
+    rate 0.0
+
+# Initial short run
+run 100
+
+# Dump output in VTK format for visualization
+# LAMMPS native dump custom can output similar data
+dump dmp all custom 200 post/mix_*.dump id type x y z vx vy vz &
+     fx fy fz omegax omegay omegaz radius
+
+# Main particle insertion run
+run     ${fillsteps}
+
+# Remove insertion fix after filling is complete
+unfix ins
+
+# Settling run - let particles settle under gravity
+run ${settlesteps}
+
+###################################Additional notes################################################
+# Key differences from LIGGGHTS:
+# 
+# 1. LAMMPS uses atom_style sphere instead of granular
+# 2. Contact models: pair_style gran/hooke/history or pair_style granular
+# 3. Walls: fix wall/gran instead of mesh-based walls
+# 4. Particle insertion: fix pour or fix deposit instead of particletemplate
+# 5. No fix property/global - material properties set in pair_style and fix wall/gran
+# 6. Dump format: LAMMPS native dump custom instead of VTK
+#    (Can use dump vtk if compiled with VTK package)
+#
+# To use more advanced granular models similar to LIGGGHTS, use:
+# pair_style granular
+# pair_coeff * * hertz/material E nu nu tangential mindlin NULL mu_s mu_r &
+#              rolling sds kR gamma_r mu_roll twisting marshall
+#
+# where E = Young's modulus, nu = Poisson ratio, mu_s = sliding friction, 
+# mu_r = rolling friction
