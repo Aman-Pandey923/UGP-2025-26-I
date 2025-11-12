@@ -1,5 +1,9 @@
-# LAMMPS input script for granular settling simulation
-# Spherical particles falling and settling under gravity
+# LAMMPS input script for three-grain mixing simulation
+# Strategy: Settle → Assign Types → Settle Again → Apply Impulse
+
+# ============================================================================
+# PHASE 1: INITIAL SETTLING WITH SINGLE GRAIN TYPE
+# ============================================================================
 
 # Initialization
 units           si
@@ -10,27 +14,27 @@ comm_modify     vel yes
 
 # Domain definition
 region          box block 0 0.1 0 0.1 0 0.2 units box
-create_box      1 box
+create_box      3 box  # 3 types for 3 grain types
 
 # Particle properties
 variable        density equal 2500.0    # kg/m^3 (sand-like)
 variable        radius equal 0.0025     # 2.5mm radius (5mm diameter particles)
 variable        diam equal 2.0*${radius}
 
-# Create multiple batches of particles in different regions for better random distribution
+# Create multiple batches of particles (all type 1 initially) - 3X MORE GRAINS
 # Batch 1 - upper region
 region          creation1 block 0.01 0.09 0.01 0.09 0.15 0.19 units box
-create_atoms    1 random 800 12345 creation1
+create_atoms    1 random 2400 12345 creation1
 
 # Batch 2 - middle-upper region
 region          creation2 block 0.01 0.09 0.01 0.09 0.11 0.15 units box
-create_atoms    1 random 800 54321 creation2
+create_atoms    1 random 2400 54321 creation2
 
 # Batch 3 - lower-middle region  
 region          creation3 block 0.01 0.09 0.01 0.09 0.07 0.11 units box
-create_atoms    1 random 600 98765 creation3
+create_atoms    1 random 1800 98765 creation3
 
-# Set particle properties
+# Set particle properties (all same initially)
 set             group all diameter ${diam}
 set             group all density ${density}
 set             group all type 1
@@ -46,7 +50,6 @@ neighbor        0.003 bin
 neigh_modify    delay 0 every 1 check yes one 4000
 
 # Particle-particle interaction with restitution coefficient
-# Restitution coefficient ~0.7 for partially elastic collisions
 pair_style      gran/hertz/history 2e8 NULL 5e7 NULL 0.3 0
 pair_coeff      * *
 
@@ -72,8 +75,12 @@ thermo          2000
 thermo_modify   lost warn
 
 # Dump for visualization (every 1000 steps)
-dump            viz all custom 1000 dump.grain id type x y z radius vx vy vz
+dump            viz all custom 1000 dump.settling.grain id type x y z radius vx vy vz
 dump_modify     viz sort id
+
+print "========================================="
+print "PHASE 1: Initial settling of all particles"
+print "========================================="
 
 # Initial equilibration with very small timestep
 run             30000
@@ -90,13 +97,181 @@ timestep        0.00001   # 10 microseconds
 run             200000
 
 # Write settled configuration
-write_data      settled_before_impulse.data
+write_data      settled_single_type.data
 
-# Apply single uniform upward impulse to all particles
-velocity        all set 0.0 0.0 1.5 units box
+print "========================================="
+print "PHASE 1 COMPLETE: All particles settled"
+print "========================================="
 
-# Continue simulation to see response to impulse
-run             150000
+# ============================================================================
+# PHASE 2: ASSIGN TYPES BASED ON Z-HEIGHT WITH SINUSOIDAL BOUNDARIES
+# ============================================================================
 
-# Write final configuration after impulse
-write_data      final_after_impulse.data
+print "========================================="
+print "PHASE 2: Assigning grain types with sinusoidal boundaries"
+print "========================================="
+
+# Unfix and undump before type assignment
+unfix           grav
+unfix           zwall1
+unfix           xwall1
+unfix           ywall1
+unfix           integrate
+undump          viz
+
+# Define fixed boundary heights based on typical settling
+# With 3X more particles, settling height will be higher
+# Adjusted to create THREE distinct visible layers
+variable        h1 equal 0.03             # First boundary at 4cm (lower third)
+variable        h2 equal 0.06             # Second boundary at 8cm (middle third)
+
+# Define sinusoidal boundary parameters
+variable        amp equal 0.008           # amplitude (8mm) - adjust for visibility
+variable        wavelength equal 0.05     # wavelength (50mm)
+variable        k equal 2*PI/${wavelength}
+variable        phase2 equal PI/3         # phase shift for second boundary
+variable        phase3 equal 2*PI/3       # phase shift for third boundary
+
+print "Boundary 1 (avg): ${h1} m"
+print "Boundary 2 (avg): ${h2} m"
+print "Amplitude: ${amp} m"
+print "Wavelength: ${wavelength} m"
+
+# Define atom-style variables for position-dependent boundaries
+variable        xpos atom x
+variable        ypos atom y
+variable        zpos atom z
+
+# Sinusoidal boundaries (varying in x-direction)
+variable        boundary1 atom ${h1}+${amp}*sin(${k}*v_xpos)
+variable        boundary2 atom ${h2}+${amp}*sin(${k}*v_xpos+${phase2})
+
+# Create atom-style boolean variables for layer assignment
+variable        is_layer1 atom v_zpos<v_boundary1
+variable        is_layer2 atom v_zpos>=v_boundary1&&v_zpos<v_boundary2
+variable        is_layer3 atom v_zpos>=v_boundary2
+
+# Assign types based on z-position relative to sinusoidal boundaries
+# Type 1: bottom layer (z < boundary1)
+# Type 2: middle layer (boundary1 <= z < boundary2)
+# Type 3: top layer (z >= boundary2)
+
+group           layer1 variable is_layer1
+group           layer2 variable is_layer2
+group           layer3 variable is_layer3
+
+# Set types
+set             group layer1 type 1
+set             group layer2 type 2
+set             group layer3 type 3
+
+# Set different densities for each grain type (affects mixing behavior)
+set             type 1 density 2500.0   # Dense grains (bottom)
+set             type 2 density 2000.0   # Medium grains (middle)  
+set             type 3 density 1500.0   # Light grains (top)
+
+# Keep same diameter for all types
+set             type 1 diameter ${diam}
+set             type 2 diameter ${diam}
+set             type 3 diameter ${diam}
+
+# Count particles in each type
+variable        n1 equal count(layer1)
+variable        n2 equal count(layer2)
+variable        n3 equal count(layer3)
+
+print "Type 1 (bottom) particles: ${n1}"
+print "Type 2 (middle) particles: ${n2}"
+print "Type 3 (top) particles: ${n3}"
+
+# ============================================================================
+# PHASE 3: BRIEF RE-SETTLING AFTER TYPE ASSIGNMENT
+# ============================================================================
+
+print "========================================="
+print "PHASE 3: Re-settling after type assignment"
+print "========================================="
+
+# Redefine groups for all types
+group           type1 type 1
+group           type2 type 2
+group           type3 type 3
+
+# Re-establish fixes
+fix             grav all gravity 9.81 vector 0 0 -1
+fix             zwall1 all wall/gran hertz/history 2e8 NULL 5e7 NULL 0.3 0 zplane 0.0 0.2
+fix             xwall1 all wall/gran hertz/history 2e8 NULL 5e7 NULL 0.3 0 xplane 0.0 0.1
+fix             ywall1 all wall/gran hertz/history 2e8 NULL 5e7 NULL 0.3 0 yplane 0.0 0.1
+fix             integrate all nve/sphere
+
+# New dump with all three types
+dump            viz2 all custom 500 dump.types.grain id type x y z radius vx vy vz fx fy fz
+dump_modify     viz2 sort id
+
+# Brief settling to adjust to new density distribution
+timestep        0.00001
+run             100000
+
+# Write configuration after type assignment and re-settling
+write_data      settled_three_types.data
+
+print "========================================="
+print "PHASE 3 COMPLETE: Three-type system settled"
+print "========================================="
+
+# ============================================================================
+# PHASE 4: APPLY IMPULSE AND OBSERVE MIXING
+# ============================================================================
+
+print "========================================="
+print "PHASE 4: Applying impulse to induce mixing"
+print "========================================="
+
+# Strategy: Localized vertical impact in center region
+# This creates mixing without being too violent
+
+region          impact_zone cylinder z 0.05 0.05 0.025 0.05 0.15 units box
+group           impact_grains region impact_zone
+
+# Count particles in impact zone
+variable        n_impact equal count(impact_grains)
+print "Particles in impact zone: ${n_impact}"
+
+# Apply downward impulse to create mixing (simulates dropping an object)
+velocity        impact_grains set 0.0 0.0 -21.0 units box
+
+# Higher frequency dumps to capture mixing dynamics
+dump_modify     viz2 every 200
+
+# Add compute for kinetic energy to monitor when system settles
+compute         ke_all all ke/atom
+compute         ke_total all reduce sum c_ke_all
+
+# Track average z-position of each type to monitor mixing
+compute         z1 type1 reduce ave z
+compute         z2 type2 reduce ave z
+compute         z3 type3 reduce ave z
+
+# Output mixing metrics
+thermo_style    custom step atoms ke pe c_ke_total c_z1 c_z2 c_z3
+thermo          1000
+
+fix             mixing_stats all ave/time 1000 1 1000 c_z1 c_z2 c_z3 file mixing_evolution.txt
+
+print "Running simulation with impulse..."
+run             100000
+
+# Write final configuration after mixing
+write_data      final_mixed_state.data
+
+print "========================================="
+print "SIMULATION COMPLETE"
+print "========================================="
+print "Output files generated:"
+print "  - settled_single_type.data (after phase 1)"
+print "  - settled_three_types.data (after phase 3)"
+print "  - final_mixed_state.data (after phase 4)"
+print "  - dump.settling.grain (phase 1 visualization)"
+print "  - dump.types.grain (phases 3-4 visualization)"
+print "  - mixing_evolution.txt (mixing metrics)"
+print "========================================="
