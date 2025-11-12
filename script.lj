@@ -1,81 +1,93 @@
+# LAMMPS input script for granular settling simulation
+# Spherical particles falling and settling under gravity
+
+# Initialization
 units           si
 atom_style      sphere
 boundary        f f f
 newton          off
 comm_modify     vel yes
 
+# Domain definition
 region          box block 0 0.1 0 0.1 0 0.2 units box
-
 create_box      1 box
 
 # Particle properties
-
 variable        density equal 2500.0    # kg/m^3 (sand-like)
-variable        radius equal 0.005      # 5mm radius (1cm diameter particles)
+variable        radius equal 0.0025     # 2.5mm radius (5mm diameter particles)
+variable        diam equal 2.0*${radius}
 
-# Create particles randomly in upper half of box
+# Create multiple batches of particles in different regions for better random distribution
+# Batch 1 - upper region
+region          creation1 block 0.01 0.09 0.01 0.09 0.15 0.19 units box
+create_atoms    1 random 800 12345 creation1
 
-region          creation block 0.01 0.09 0.01 0.09 0.12 0.19 units box
-create_atoms    1 random 200 12345 creation
+# Batch 2 - middle-upper region
+region          creation2 block 0.01 0.09 0.01 0.09 0.11 0.15 units box
+create_atoms    1 random 800 54321 creation2
+
+# Batch 3 - lower-middle region  
+region          creation3 block 0.01 0.09 0.01 0.09 0.07 0.11 units box
+create_atoms    1 random 600 98765 creation3
 
 # Set particle properties
-
-set             group all diameter ${radius}
+set             group all diameter ${diam}
 set             group all density ${density}
 set             group all type 1
 
 # Define groups
-
 group           particles type 1
 
-# Neighbor list
+# Zero all velocities to prevent initial random motion
+velocity        all set 0.0 0.0 0.0 units box
 
-neighbor        0.001 bin
+# Neighbor list with larger skin distance
+neighbor        0.003 bin
+neigh_modify    delay 0 every 1 check yes one 4000
 
-neigh_modify    delay 0
-
-# Particle-particle interaction (Hertzian contact)
-
-pair_style      gran/hertz/history 2e8 NULL 5e7 NULL 0.5 0  # Kn, Kt, gamma_n, gamma_t, xmu, dampflag
-
+# Particle-particle interaction with restitution coefficient
+# Restitution coefficient ~0.7 for partially elastic collisions
+pair_style      gran/hertz/history 2e8 NULL 5e7 NULL 0.3 0
 pair_coeff      * *
 
-# Timestep
-
-timestep        0.00001   # 10 microseconds
+# Smaller initial timestep for stability
+timestep        0.0000005   # 0.5 microsecond initially
 
 # Gravity
-
 fix             grav all gravity 9.81 vector 0 0 -1
 
-# Walls (granular walls)
-
-fix             xwall1 all wall/gran hertz/history 2e8 NULL 5e7 NULL 0.5 0 xplane 0.0 0.1
-
-fix             ywall1 all wall/gran hertz/history 2e8 NULL 5e7 NULL 0.5 0 yplane 0.0 0.1
-
-fix             zwall1 all wall/gran hertz/history 2e8 NULL 5e7 NULL 0.5 0 zplane 0.0 0.2
+# Walls (granular walls) with same contact properties
+fix             zwall1 all wall/gran hertz/history 2e8 NULL 5e7 NULL 0.3 0 zplane 0.0 0.2
+fix             xwall1 all wall/gran hertz/history 2e8 NULL 5e7 NULL 0.3 0 xplane 0.0 0.1
+fix             ywall1 all wall/gran hertz/history 2e8 NULL 5e7 NULL 0.3 0 yplane 0.0 0.1
 
 # Time integration
-
 fix             integrate all nve/sphere
 
 # Output settings
+thermo_style    custom step atoms ke pe etotal vol
+thermo          2000
 
-thermo_style    custom step atoms ke pe etotal
+# Check for lost atoms
+thermo_modify   lost warn
 
-thermo          1000
-
-# Dump for visualization (every 500 steps)
-
-dump            viz all custom 500 dump.grain id type x y z radius vx vy vz
-
+# Dump for visualization (every 1000 steps)
+dump            viz all custom 1000 dump.grain id type x y z radius vx vy vz
 dump_modify     viz sort id
 
-# Run simulation
+# Initial equilibration with very small timestep
+run             30000
 
-run             50000
+# Increase timestep gradually
+timestep        0.000002   # 2 microseconds
+run             30000
+
+timestep        0.000005   # 5 microseconds
+run             40000
+
+# Normal timestep for main simulation
+timestep        0.00001   # 10 microseconds
+run             200000
 
 # Write final configuration
-
 write_data      final_settled.data
