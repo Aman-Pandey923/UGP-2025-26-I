@@ -89,5 +89,22 @@ run             40000
 timestep        0.00001   # 10 microseconds
 run             200000
 
-# Write final configuration
-write_data      final_settled.data
+# Write settled configuration
+write_data      settled_before_impulse.data
+
+# Apply impulse to all particles
+# Give particles a sudden velocity impulse (like a shake or impact)
+velocity        all set 0.5 0.0 1.0 units box
+
+# Continue simulation to see response to impulse
+run             100000
+
+# Apply another impulse from a different direction
+velocity        all set -0.3 0.4 0.5 units box
+run             100000
+
+# Let system settle again after impulses
+run             100000
+
+# Write final configuration after impulses
+write_data      final_after_impulse.data
