@@ -1,0 +1,81 @@
+units           si
+atom_style      sphere
+boundary        f f f
+newton          off
+comm_modify     vel yes
+
+region          box block 0 0.1 0 0.1 0 0.2 units box
+
+create_box      1 box
+
+# Particle properties
+
+variable        density equal 2500.0    # kg/m^3 (sand-like)
+variable        radius equal 0.005      # 5mm radius (1cm diameter particles)
+
+# Create particles randomly in upper half of box
+
+region          creation block 0.01 0.09 0.01 0.09 0.12 0.19 units box
+create_atoms    1 random 200 12345 creation
+
+# Set particle properties
+
+set             group all diameter ${radius}
+set             group all density ${density}
+set             group all type 1
+
+# Define groups
+
+group           particles type 1
+
+# Neighbor list
+
+neighbor        0.001 bin
+
+neigh_modify    delay 0
+
+# Particle-particle interaction (Hertzian contact)
+
+pair_style      gran/hertz/history 2e8 NULL 5e7 NULL 0.5 0  # Kn, Kt, gamma_n, gamma_t, xmu, dampflag
+
+pair_coeff      * *
+
+# Timestep
+
+timestep        0.00001   # 10 microseconds
+
+# Gravity
+
+fix             grav all gravity 9.81 vector 0 0 -1
+
+# Walls (granular walls)
+
+fix             xwall1 all wall/gran hertz/history 2e8 NULL 5e7 NULL 0.5 0 xplane 0.0 0.1
+
+fix             ywall1 all wall/gran hertz/history 2e8 NULL 5e7 NULL 0.5 0 yplane 0.0 0.1
+
+fix             zwall1 all wall/gran hertz/history 2e8 NULL 5e7 NULL 0.5 0 zplane 0.0 0.2
+
+# Time integration
+
+fix             integrate all nve/sphere
+
+# Output settings
+
+thermo_style    custom step atoms ke pe etotal
+
+thermo          1000
+
+# Dump for visualization (every 500 steps)
+
+dump            viz all custom 500 dump.grain id type x y z radius vx vy vz
+
+dump_modify     viz sort id
+
+# Run simulation
+
+run             50000
+
+# Write final configuration
+
+write_data      final_settled.data
